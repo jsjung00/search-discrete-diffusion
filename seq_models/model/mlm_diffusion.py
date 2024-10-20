@@ -184,11 +184,14 @@ class ValueShell(DiscBaseModel):
         self
     ):
         super().__init__()
-        self.network = SimpleValueNetwork(vocab_size=30)
-        #self.network = ValueNetwork(vocab_size=30, dropout=0, bert_config_name="prajjwal1/bert-tiny",
-        #                            target_channels=1)
-        self.opt = torch.optim.Adam(self.network.parameters(), lr=0.001)
-
+        #self.network = SimpleValueNetwork(vocab_size=30)
+        self.network = ValueNetwork(vocab_size=30, dropout=0, bert_config_name="prajjwal1/bert-tiny",
+                                    target_channels=1)
+        #self.opt = torch.optim.Adam(self.network.parameters(), lr=0.001)
+        self.lr = 0.001
+    def setup(self, stage=None):
+        # This method is called by PyTorch Lightning after the model is initialized
+        self.opt = torch.optim.Adam(self.network.parameters(), lr=self.lr)
     
     def forward(
         self,
@@ -200,6 +203,10 @@ class ValueShell(DiscBaseModel):
         out = {}
         out["regression_mse"] = regression_loss.mean()
         return out 
+    
+    def configure_optimizers(self):
+        # This method is used by PyTorch Lightning to get the optimizer
+        return self.opt
 
 class MLMDiffusion(BaseModel):
 
@@ -222,9 +229,6 @@ class MLMDiffusion(BaseModel):
     def freeze_for_discriminative(self):
         for _, p in enumerate(self.network.parameters()):
             p.requires_grad_(False)
-
-        for _, p in enumerate(self.network.regression_head.parameters()):
-            p.requires_grad_(True)
 
     def forward(
         self,
@@ -371,6 +375,28 @@ class MLMDiffusion(BaseModel):
         logits = self.network.cls(h + delta.data)
         return logits
 
+    def stochastic_guidance(self, logits, value_model):
+        self.freeze_for_discriminative()
+        # returns stoachsically guided logits. logits: (batch_size, ...)
+        perturbed_logits = []
+
+        for i in range(len(logits)):
+            hidden = logits[i]
+            NUM_COPIES= 100
+            NOISE_STD=1
+            noisy_hiddens = hidden.unsqueeze(0).repeat(NUM_COPIES, 1,1) 
+            noisy_hiddens = noisy_hiddens + torch.randn_like(noisy_hiddens)*NOISE_STD
+            noisy_samples = Categorical(logits=noisy_hiddens).sample()
+
+            with torch.no_grad():
+                scores = value_model.network(noisy_samples)
+            
+            best_index = torch.argmax(scores)
+            best_noisy_tensor = noisy_hiddens[best_index]
+            perturbed_logits.append(best_noisy_tensor)
+            
+        return torch.stack(perturbed_logits)
+
 
     def sample(
         self,
@@ -378,9 +404,10 @@ class MLMDiffusion(BaseModel):
         infill_mask,
         corrupt_mask,
         num_samples,
+        value_model,
         search_guidance=False,
         bad_word_ids=None,
-        return_best=True 
+        return_best=False 
     ):
         device = next(self.parameters()).device
         
@@ -409,12 +436,9 @@ class MLMDiffusion(BaseModel):
             logits = model_output["logits"]
             
             if search_guidance:
-                '''
-                logits = self.guidance_steps(
-                    model_output, t, attn_mask, infill_mask, 
-                    **guidance_kwargs
-                )
-                '''
+                logits = self.stochastic_guidance(logits, value_model)
+                print("DOING GUIDANCE\n")
+
 
             if bad_word_ids is not None:
                 logits[:, :, bad_word_ids] = -1e9
@@ -435,24 +459,13 @@ class MLMDiffusion(BaseModel):
 
             pred_ids = torch.where(infill_mask.squeeze(-1), clean_x, infill_seed[None])
 
-            if search_guidance:
-                #TODO: add the guidance score here 
-                #labels = self.network.guidance_score(pred_ids, t, attn_mask).cpu().numpy()
-                #pred_ids = (pred_ids.cpu().numpy(), score)
-                pass
-            else:
-                pred_ids = pred_ids.cpu().numpy()
+            pred_ids = pred_ids.cpu().numpy()
 
             traj.append(pred_ids)
-
-        if return_best:
-            best_idx = np.argmax(np.stack([t[1] for t in traj], axis=1), axis=1)
-            samples = np.stack([
-                traj[idx][0][i] for i, idx in enumerate(best_idx)
-            ], axis=0)
-        else:
-            samples = traj[-1][0]
-
+        
+        # Return all of the generated samples at the end 
+        samples = traj[-1]
+    
         return samples
     
     def sample_autoregressive(

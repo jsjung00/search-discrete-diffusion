@@ -1,5 +1,9 @@
 import os
+import sys 
+root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(root_dir)
 import copy
+
 import torch
 import pandas as pd
 from pprint import pprint
@@ -72,12 +76,29 @@ def make_sampling_csv(
 
     df.to_csv(out_fn, index=False)
 
+
+def disc_eval_samples(samples, value_model, tokenizer):
+    '''
+    samples: List[str]. Each string is a sequence seperated by spaces 
+
+    Evaluates the samples by considering the average score of the model 
+    '''   
+    #TODO: add in path to trained weights, load the model, then run inference 
+    seqs = [tokenizer.convert_tokens_to_ids(sample.split(" ")) for sample in samples]
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    t_seqs = torch.Tensor(seqs).int().to(device)
+    value_model.network.to(device)
+    
+    value_hat = value_model.network(t_seqs)
+    return value_hat.mean() 
+
+
 def sample_model(
     model,
+    value_model, 
     num_samples,
     infill_seed_file,
     vocab_file,
-    gt_data_file=None,
     guidance_kwargs=None,
     use_alignment_tokens=True,
     bad_word_ids=None,
@@ -98,8 +119,7 @@ def sample_model(
     )
 
     for i, infill_seed in enumerate(infill_seeds):
-        
-        tag = "" if guidance_kwargs is None else "guided_"
+        tag = ""
         if infill_seed is None:
             tag += "unconditional" 
         else:
@@ -131,10 +151,8 @@ def sample_model(
 
         sample_fn = model.sample
         if autoregressive_sample:
+            raise ValueError("Should not be autoregressive")
             sample_fn = model.sample_autoregressive
-    
-        if guidance_kwargs is not None:
-            model.network.regression_head.stop_grad = False
 
         with torch.no_grad():
             samples = sample_fn(
@@ -142,12 +160,19 @@ def sample_model(
                 infill_mask=infill_mask,
                 corrupt_mask=corrupt_mask,
                 num_samples=num_samples,
-                guidance_kwargs=copy.deepcopy(guidance_kwargs),
+                search_guidance=guidance_kwargs is not None, 
                 bad_word_ids=bad_word_ids,
+                value_model = value_model
                 # batch_size=256
             )
+    
         samples = [tokenizer.decode(s) for s in samples]
 
+        mean_value = disc_eval_samples(samples, value_model, tokenizer)
+        print(f"\n Mean value is: {mean_value}")
+        return mean_value
+        # TODO: evaluate samples 
+        '''
         seed_log, seed_wandb_log = metrics.evaluate_samples(
             samples,
             infill_seed=None,
@@ -155,11 +180,19 @@ def sample_model(
             gt_file=gt_data_file,
             log_prefix=tag
         )
-                
+        df = 
         log.update(seed_log)
         wandb_log.update(seed_wandb_log)
-
-    return log, wandb_log
+        '''
+        '''
+        df = metrics.evaluate_samples(
+            samples,
+            infill_seed=None,
+            vocab_file=vocab_file,
+            gt_file=gt_data_file,
+            log_prefix=tag
+        )
+        '''
 
 def sample_inner_loop(
     seeds_fn,

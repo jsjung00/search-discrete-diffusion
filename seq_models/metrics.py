@@ -23,11 +23,6 @@ class BioPythonSeqLabeler():
 
     def __init__(self, use_lm=True):
         self.use_lm = use_lm
-        if use_lm:
-            os.environ["TOKENIZERS_PARALLELISM"] = "false"
-            device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-            self.tokenizer = AutoTokenizer.from_pretrained('nferruz/ProtGPT2') # replace with the actual path
-            self.model = GPT2LMHeadModel.from_pretrained('nferruz/ProtGPT2').to(device) 
 
     def lm_wrapper(self, samples):
         ppls = []
@@ -86,12 +81,6 @@ class BioPythonSeqLabeler():
         seq_labels.update({
             f"aa_perc_{aatype}": perc for aatype, perc in zip(aa_types, aa_frac)
         })
-
-        if self.use_lm:
-            seq_labels.update({
-                f"lm_nll": self.lm_wrapper([seq])[0]
-            })
-
         return seq_labels
 
     def label_seqs(self, seqs):  
@@ -214,7 +203,9 @@ def evaluate_samples(
         return log
 
     samp_df = labeler.label_seqs(s_for_labels)
-    
+    return samp_df
+
+
     gt_df = None if gt_file is None else pd.read_csv(gt_file)
     
     rand_df = None
