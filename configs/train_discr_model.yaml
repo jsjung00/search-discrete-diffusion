@@ -5,24 +5,24 @@ seed: ${trial_id}
 trial_id: 0
 project_name: guided_protein_seq
 
-data_dir: /scratch/nvg7279/datasets/igfold_labeled_cleaned
-train_fn: train.csv
+data_dir: /home/justin/Desktop/Code/search-discrete-diffusion/data
+train_fn: train_*.csv
 val_fn: val_iid.csv
 max_samples: 100000
 
 target_cols: ['sasa'] #['ss_perc_sheet']
 discr_epoch_ratio: null
 
-vocab_file: /home/nvg7279/src/seq-struct/vocab.txt
+vocab_file: /home/justin/Desktop/Code/search-discrete-diffusion/vocab.txt
 vocab_size: 30
 use_alignment_tokens: True
 
-log_dir: /scratch/nvg7279/logs/guided_protein_seq
-exp_name: train_disrc_test
+log_dir: /home/justin/Desktop/Code/search-discrete-diffusion/disc_logs
+exp_name: train_disrc_small_test
 exp_dir: ${log_dir}/${exp_name}
 
-ckpt_path: /scratch/nvg7279/logs/guided_protein_seq/ar_mlm_test/models/best_by_valid/epoch=74-step=53700.ckpt
-train_w_noise: True
+#ckpt_path: /scratch/nvg7279/logs/guided_protein_seq/ar_mlm_test/models/best_by_valid/epoch=74-step=53700.ckpt
+#train_w_noise: True
 
 max_seq_len: 300
 min_seq_len: 128

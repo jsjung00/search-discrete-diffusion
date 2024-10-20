@@ -23,7 +23,7 @@ from transformers.models.bert.modeling_bert import (
     BertOnlyMLMHead,
 )
 
-from seq_models.trainer import BaseModel
+from seq_models.trainer import BaseModel, DiscBaseModel 
 from seq_models.nets.regression import (
     RegressionHead,
     RegressionModel,
@@ -119,6 +119,87 @@ class MLMDiffusionTransformer(nn.Module):
         labels = self.get_labels(input_ids, timesteps, attn_mask, sequence_output)
         return labels.sum(-1) 
 
+
+# train the value function 
+
+
+class ValueNetwork(nn.Module):
+    def __init__(
+        self,
+        vocab_size,
+        dropout=0,
+        bert_config_name='bert-base-uncased',
+        target_channels=2,
+    ):
+        super().__init__()
+
+        config = AutoConfig.from_pretrained(bert_config_name)
+        config.hidden_dropout_prob = dropout
+        config.vocab_size = vocab_size
+        # config.hidden_size = 512
+
+        self.target_channels = target_channels
+        self.dropout = dropout
+        self.vocab_size = vocab_size
+
+        self.embeddings = BertEmbeddings(config)
+        self.encoder = BertEncoder(config)
+        # self.cls.predictions.decoder.weight = self.embeddings.word_embeddings.weight
+
+        self.LayerNorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
+        self.dropout = nn.Dropout(config.hidden_dropout_prob)
+
+        self.regression_head = RegressionHead(
+            config, 
+            target_channels
+        )
+
+    def forward(
+        self, 
+        input_ids
+    ):
+       
+        token_embed = self.embeddings(input_ids)
+        embed = self.dropout(self.LayerNorm(token_embed))
+
+        sequence_output = self.encoder(embed, encoder_attention_mask=None)[0]
+        return self.regression_head(sequence_output)
+
+class SimpleValueNetwork(nn.Module):
+    def __init__(self, vocab_size, embedding_dim=64, hidden_dim=128, output_dim=1):
+        super().__init__()
+        self.embedding = nn.Embedding(vocab_size, embedding_dim)
+        self.lstm = nn.LSTM(embedding_dim, hidden_dim, batch_first=True)
+        self.fc = nn.Linear(hidden_dim, output_dim)
+
+    def forward(self, input_ids):
+        embedded = self.embedding(input_ids)
+        _, (hidden, _) = self.lstm(embedded)
+        output = self.fc(hidden.squeeze(0))
+        return output
+
+
+class ValueShell(DiscBaseModel):
+    def __init__(
+        self
+    ):
+        super().__init__()
+        self.network = SimpleValueNetwork(vocab_size=30)
+        #self.network = ValueNetwork(vocab_size=30, dropout=0, bert_config_name="prajjwal1/bert-tiny",
+        #                            target_channels=1)
+        self.opt = torch.optim.Adam(self.network.parameters(), lr=0.001)
+
+    
+    def forward(
+        self,
+        input_ids,
+        labels=None,
+    ):
+        pred_labels = self.network(input_ids)
+        regression_loss = (pred_labels - labels).pow(2)
+        out = {}
+        out["regression_mse"] = regression_loss.mean()
+        return out 
 
 class MLMDiffusion(BaseModel):
 
@@ -297,8 +378,9 @@ class MLMDiffusion(BaseModel):
         infill_mask,
         corrupt_mask,
         num_samples,
-        guidance_kwargs=None,
+        search_guidance=False,
         bad_word_ids=None,
+        return_best=True 
     ):
         device = next(self.parameters()).device
         
@@ -317,9 +399,6 @@ class MLMDiffusion(BaseModel):
         x = torch.where(infill_mask, x, noisy_gt)
         attn_mask = torch.ones_like(infill_mask, dtype=torch.bool)
 
-        return_best = guidance_kwargs.pop("return_best", False) \
-            if guidance_kwargs is not None else False
-
         traj = []
         for i in tqdm.tqdm(indices):
             t = torch.tensor([i] * shape[0], device=device)
@@ -329,11 +408,13 @@ class MLMDiffusion(BaseModel):
             
             logits = model_output["logits"]
             
-            if guidance_kwargs is not None:
+            if search_guidance:
+                '''
                 logits = self.guidance_steps(
                     model_output, t, attn_mask, infill_mask, 
                     **guidance_kwargs
                 )
+                '''
 
             if bad_word_ids is not None:
                 logits[:, :, bad_word_ids] = -1e9
@@ -354,9 +435,11 @@ class MLMDiffusion(BaseModel):
 
             pred_ids = torch.where(infill_mask.squeeze(-1), clean_x, infill_seed[None])
 
-            if guidance_kwargs is not None:
-                labels = self.network.guidance_score(pred_ids, t, attn_mask).cpu().numpy()
-                pred_ids = (pred_ids.cpu().numpy(), labels)
+            if search_guidance:
+                #TODO: add the guidance score here 
+                #labels = self.network.guidance_score(pred_ids, t, attn_mask).cpu().numpy()
+                #pred_ids = (pred_ids.cpu().numpy(), score)
+                pass
             else:
                 pred_ids = pred_ids.cpu().numpy()
 

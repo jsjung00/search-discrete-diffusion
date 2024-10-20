@@ -1,11 +1,11 @@
 defaults:
-  - model: gaussian
+  - model: mlm 
 
 seed: ${trial_id}
 trial_id: 0
 project_name: guided_protein_seq
 
-data_dir: /scratch/nvg7279/datasets/igfold_labeled_cleaned
+data_dir: /home/justin/Desktop/Code/search-discrete-diffusion/data
 #/scratch/nvg7279/datasets/sabdab_and_poas
 train_fn: train_*.csv #train.csv
 val_fn: val_iid.csv
@@ -14,18 +14,18 @@ max_samples: 100000
 target_cols: null #['sasa']
 discr_batch_ratio: null
 
-vocab_file: /home/nvg7279/src/seq-struct/vocab.txt
+vocab_file: /home/justin/Desktop/Code/search-discrete-diffusion/vocab.txt
 vocab_size: 30
 use_alignment_tokens: True
 
-log_dir: /scratch/nvg7279/logs/guided_protein_seq
-exp_name: ar_mlm_test
+log_dir: /home/justin/Desktop/Code/search-discrete-diffusion/logs
+exp_name: search_discrete
 exp_dir: ${log_dir}/${exp_name}
 
-val_sample_frequency: 4
+val_sample_frequency: 10000
 num_samples: 256
 infill_seeds_fn: null #/home/nvg7279/src/seq-struct/infill_test_seeds.txt
-guidance_kwargs: null
+guidance_kwargs: {'add_guidance': True}
 autoregressive_sample: False
 
 resume_ckpt: null

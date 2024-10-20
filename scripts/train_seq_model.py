@@ -1,5 +1,8 @@
 import os
 import sys
+root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(root_dir)
+
 import pprint
 from pathlib import Path
 import hydra
@@ -21,10 +24,12 @@ def main(config):
 
     log_config = flatten_config(OmegaConf.to_container(config, resolve=True), sep='/')
     log_config = {'/'.join(('config', key)): val for key, val in log_config.items()}
+    '''
     wandb.init(
          project="guided_protein_seq",
          config=log_config,
     )
+    '''
 
     # there must be a way to get hydra to do this for me
     if config.target_cols and len(config.target_cols) > 0:

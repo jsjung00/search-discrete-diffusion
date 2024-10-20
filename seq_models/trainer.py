@@ -71,6 +71,46 @@ class BaseModel(pl.LightningModule):
         return config
     
 
+class DiscBaseModel(pl.LightningModule):
+    def __init__(self):
+        super().__init__()
+
+        self.discr_batch_ratio = None
+        self.train_epoch_counter = 0
+        self.train_epoch_last_time = time.time()
+
+    def training_step(self, batch, batch_idx):        
+        out = self.forward(
+            batch["seq"],
+            labels=batch["labels"]
+        )        
+
+        log_dict = {f"train_{k}" : v for k, v in out.items()}
+        self.log_dict(log_dict)  # Don't seem to need rank zero or sync dist
+        return out["regression_mse"]
+
+    def validation_step(self, batch, batch_idx):
+        with torch.no_grad():
+            assert "labels" in batch 
+            out = self.forward(
+                batch["seq"],
+                labels=batch["labels"]
+            )
+                
+        log_dict = {f"val_{k}" : v for k, v in out.items()}
+        self.log_dict(log_dict, rank_zero_only=True)
+
+        return {"val_loss": out['regression_mse']}
+    
+    def configure_optimizers(self):
+        config = {
+            "optimizer": self.opt
+        }
+        return config 
+
+
+
+
 class SampleEvaluationCallback(Callback):
 
     def __init__(
@@ -103,7 +143,7 @@ class SampleEvaluationCallback(Callback):
             self.infill_seed_file,
             self.vocab_file,
             self.gt_data_file,
-            self.guidance_kwargs,
+            self.guidance_kwargs, 
             self.use_alignment_tokens,
             self.autoregressive_sample,
         )
@@ -140,6 +180,54 @@ def get_trainer(config, num_train_batches):
     if torch.cuda.is_available():
         accelerator = "gpu"
         strategy = "ddp"
+        # if torch.cuda.device_count() > 1:
+        #     strategy = DDPStrategy(find_unused_parameters=False)
+
+    trainer = pl.Trainer(
+        default_root_dir=config.exp_dir,
+        gradient_clip_val=config.gradient_clip,
+        min_epochs=config.min_epochs,
+        max_epochs=config.max_epochs,
+        check_val_every_n_epoch=1,
+        callbacks=callbacks,
+        logger=wandb_logger,
+        log_every_n_steps=min(200, num_train_batches),  # Log >= once per epoch
+        accelerator=accelerator,
+        strategy=strategy,
+        devices=config.ngpu,
+        enable_progress_bar=True,#False,
+        # move_metrics_to_cpu=False,  # Saves memory
+    )
+
+    return trainer
+
+def get_disc_trainer(config, num_train_batches):
+    os.makedirs(os.path.join(config.exp_dir, "disc_models/best_by_valid"), exist_ok=True)
+    os.makedirs(os.path.join(config.exp_dir, "disc_models/best_by_train"), exist_ok=True)
+    callbacks = [
+        pl.callbacks.ModelCheckpoint(
+            monitor="val_regression_mse",
+            dirpath=os.path.join(config.exp_dir, "disc_models/best_by_valid"),
+            save_top_k=5,
+            # save_weights_only=True,
+            mode="min",
+        ),
+        pl.callbacks.ModelCheckpoint(
+            monitor="train_regression_mse",
+            dirpath=os.path.join(config.exp_dir, "disc_models/best_by_train"),
+            save_top_k=5,
+            # save_weights_only=True,
+            mode="min",
+        )
+    ]
+
+    wandb_logger = WandbLogger(project="train_value_function", dir=config.exp_dir)
+
+    accelerator, strategy = "cpu", None
+    if torch.cuda.is_available():
+        accelerator = "gpu"
+        strategy = "ddp"
+        #strategy='ddp_find_unused_parameters_true'
         # if torch.cuda.device_count() > 1:
         #     strategy = DDPStrategy(find_unused_parameters=False)
 

@@ -1,5 +1,8 @@
 import os
 import sys
+root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(root_dir)
+
 import pprint
 from pathlib import Path
 import hydra
@@ -8,7 +11,7 @@ import wandb
 import warnings
 from omegaconf import OmegaConf
 
-from seq_models.trainer import get_trainer
+from seq_models.trainer import get_disc_trainer
 from seq_models.data import (
     get_loaders,
     make_discriminative_loader,
@@ -17,6 +20,7 @@ from scripts.utils import (
     flatten_config, 
     convert_to_dict,
 )
+from seq_models.model.mlm_diffusion import ValueShell
 
 @hydra.main(config_path="../configs", config_name="train_discr_model")
 def main(config):
@@ -25,7 +29,7 @@ def main(config):
     log_config = flatten_config(OmegaConf.to_container(config, resolve=True), sep='/')
     log_config = {'/'.join(('config', key)): val for key, val in log_config.items()}
     wandb.init(
-         project="guided_protein_seq",
+         project="train_value_function",
          config=log_config,
     )
 
@@ -35,34 +39,23 @@ def main(config):
 
     pprint.PrettyPrinter(depth=4).pprint(convert_to_dict(config))
 
-    model = hydra.utils.instantiate(config.model, _recursive_=False)
-
-    if config.ckpt_path is not None:
-        state_dict = torch.load(config.ckpt_path)['state_dict']
-        model.load_state_dict(state_dict)
+    # TODO: get the model 
+    model = ValueShell()
 
     if torch.cuda.is_available():
         model.cuda()
 
     train_dl, valid_dl = get_loaders(config)
+    disc_trainer = get_disc_trainer(config, len(train_dl))
 
-    if config.train_w_noise: #training diffusion with random timesteps
-        model.freeze_for_discriminative()
-
-        trainer = get_trainer(config, len(train_dl))
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")  # catch really annoying BioPython warnings
-            
-            trainer.fit(
-                model=model,
-                train_dataloaders=train_dl,
-                val_dataloaders=valid_dl,
-            )
-    else:
-        train_dl, valid_dl = [
-            make_discriminative_loader(config, model, dl) for dl in [train_dl, valid_dl]
-        ]
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")  # catch really annoying BioPython warnings
+        
+        disc_trainer.fit(
+            model=model,
+            train_dataloaders=train_dl,
+            val_dataloaders=valid_dl,
+        )
 
 if __name__ == "__main__":    
     main()

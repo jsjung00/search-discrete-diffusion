@@ -18,7 +18,6 @@ class RegressionHead(nn.Module):
         self, 
         config, 
         out_channels,
-        stop_grad=True,
     ):
         super().__init__()
 
@@ -34,11 +33,7 @@ class RegressionHead(nn.Module):
             nn.Linear(config.hidden_size, out_channels)
         )
 
-        self.stop_grad = stop_grad
-
     def forward(self, sequence_output, attn_mask=None):
-        if self.stop_grad:
-            sequence_output = sequence_output.detach()
         pooled_output = sequence_output.mean(1)
         pooled_output = self.regression_dropout(pooled_output)
         regression_pred = self.regression_head(pooled_output)
