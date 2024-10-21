@@ -1,6 +1,9 @@
 <div>
 <h1> Stochastic search is all you need: adding guidance to discrete diffusion</h1>
 This project evaluates a proposed method of adding guidance to discrete diffusion with a non-differentiable guidance function. At each diffusion reverse timestep, it creates random perturbations of the diffusion logits and returns the argmax based on the guidance function.    
+
+Below is the Readme for the diffusion fork below. 
+
   
 [LaMBO](https://github.com/samuelstanton/lambo) + [NOS](https://github.com/ngruver/NOS) <img src="assets/nos.jpg" height="50" style="display: inline" vertical-align: middle /> = [LaMBO-2](https://arxiv.org/abs/2305.20009) </h1>
 </div>
